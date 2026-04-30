@@ -3,6 +3,8 @@ import sqlite3
 import qrcode
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
+import cv2
+import numpy as np
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -227,9 +229,40 @@ def generar_qr(codigo):
     return buffer.getvalue()
 
 
+def cargar_fuente_bold(size):
+    rutas = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "DejaVuSans-Bold.ttf"
+    ]
+    for ruta in rutas:
+        try:
+            return ImageFont.truetype(ruta, size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+
+def dividir_codigo_etiqueta(codigo):
+    """
+    Convierte:
+    ITA-AC-01-TUNICA-#01
+    en:
+    ITA-AC-01
+    TUNICA  #01
+    """
+    partes = codigo.split("-")
+    if len(partes) >= 5:
+        linea_1 = "-".join(partes[:3])
+        talla = partes[3].replace("T", "", 1)
+        pieza = partes[4]
+        linea_2 = f"T{talla}  {pieza}" if talla.isdigit() else f"{talla}  {pieza}"
+        return linea_1, linea_2
+    return codigo, ""
+
+
 def generar_etiqueta_qr(codigo):
     """
-    Genera una etiqueta PNG con QR + código legible debajo.
+    Genera una etiqueta PNG con QR + código legible grande debajo.
     """
     qr = qrcode.QRCode(
         version=1,
@@ -241,10 +274,10 @@ def generar_etiqueta_qr(codigo):
     qr.make(fit=True)
 
     qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-    qr_img = qr_img.resize((320, 320))
+    qr_img = qr_img.resize((340, 340))
 
-    etiqueta_ancho = 420
-    etiqueta_alto = 420
+    etiqueta_ancho = 500
+    etiqueta_alto = 520
     etiqueta = Image.new("RGB", (etiqueta_ancho, etiqueta_alto), "white")
 
     x_qr = (etiqueta_ancho - qr_img.width) // 2
@@ -252,19 +285,38 @@ def generar_etiqueta_qr(codigo):
 
     draw = ImageDraw.Draw(etiqueta)
 
-    try:
-        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 40)
-    except Exception:
-        font = ImageFont.load_default()
+    font_1 = cargar_fuente_bold(42)
+    font_2 = cargar_fuente_bold(48)
 
-    bbox = draw.textbbox((0, 0), codigo, font=font)
-    text_width = bbox[2] - bbox[0]
-    x_text = (etiqueta_ancho - text_width) // 2
-    draw.text((x_text, 352), codigo, fill="black", font=font)
+    linea_1, linea_2 = dividir_codigo_etiqueta(codigo)
+
+    bbox1 = draw.textbbox((0, 0), linea_1, font=font_1)
+    text_width_1 = bbox1[2] - bbox1[0]
+    x_text_1 = (etiqueta_ancho - text_width_1) // 2
+    draw.text((x_text_1, 370), linea_1, fill="black", font=font_1)
+
+    if linea_2:
+        bbox2 = draw.textbbox((0, 0), linea_2, font=font_2)
+        text_width_2 = bbox2[2] - bbox2[0]
+        x_text_2 = (etiqueta_ancho - text_width_2) // 2
+        draw.text((x_text_2, 425), linea_2, fill="black", font=font_2)
 
     buffer = BytesIO()
     etiqueta.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def decodificar_qr_desde_imagen(uploaded_file):
+    bytes_data = uploaded_file.getvalue()
+    np_arr = np.frombuffer(bytes_data, np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    detector = cv2.QRCodeDetector()
+    data, bbox, _ = detector.detectAndDecode(img)
+
+    if data:
+        return data.strip()
+    return None
 
 
 # ======================================================
@@ -283,7 +335,8 @@ menu = st.sidebar.radio(
     [
         "Nuevo producto",
         "Inventario",
-        "Buscar producto"
+        "Buscar producto",
+        "Escanear QR"
     ]
 )
 
@@ -472,6 +525,61 @@ elif menu == "Inventario":
             file_name="inventario_tienda.csv",
             mime="text/csv"
         )
+
+# ======================================================
+# ESCANEAR QR
+# ======================================================
+
+elif menu == "Escanear QR":
+    st.header("Escanear QR")
+    st.write("Desde el iPhone, toca el botón de cámara, toma la foto del QR y la app buscará el producto.")
+
+    foto_qr = st.camera_input("Tomar foto del QR")
+
+    if foto_qr is not None:
+        codigo_leido = decodificar_qr_desde_imagen(foto_qr)
+
+        if codigo_leido:
+            st.success(f"QR leído: {codigo_leido}")
+
+            df = obtener_productos()
+            resultado = df[df["codigo"] == codigo_leido]
+
+            if resultado.empty:
+                st.warning("El código fue leído, pero no existe en el inventario.")
+            else:
+                row = resultado.iloc[0]
+                col_img, col_info, col_qr = st.columns([1, 3, 1])
+
+                with col_img:
+                    if row["foto_path"] and Path(row["foto_path"]).exists():
+                        st.image(row["foto_path"], use_container_width=True)
+                    else:
+                        st.write("Sin foto")
+
+                with col_info:
+                    st.subheader(row["codigo"])
+                    st.write(f"**Marca:** {row['marca_nombre']}")
+                    st.write(f"**Tipo:** {row['tipo_nombre']}")
+                    st.write(f"**Modelo:** {row['marca_codigo']}-{row['tipo_codigo']}-{row['modelo']}")
+                    st.write(f"**Talla:** {row['talla']}")
+                    st.write(f"**Color:** {row['color'] or 'No indicado'}")
+                    st.write(f"**Colección:** {row['coleccion']}")
+                    st.write(f"**Estado:** {row['estado']}")
+
+                    if pd.notna(row["precio"]):
+                        st.write(f"**Precio:** USD {row['precio']:,.2f}")
+                    else:
+                        st.write("**Precio:** pendiente")
+
+                    if row["descripcion"]:
+                        st.write(f"**Descripción:** {row['descripcion']}")
+
+                with col_qr:
+                    etiqueta_img = generar_etiqueta_qr(row["codigo"])
+                    st.image(etiqueta_img, caption="Etiqueta QR", width=200)
+        else:
+            st.error("No pude leer el QR. Intenta tomar la foto más de frente, con buena luz y sin sombra.")
 
 # ======================================================
 # BUSCAR PRODUCTO
