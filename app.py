@@ -382,6 +382,20 @@ elif menu == "Inventario":
         )
 
 # ======================================================
+# QR GENERATION
+# ======================================================
+
+import qrcode
+from io import BytesIO
+
+
+def generar_qr(codigo):
+    qr = qrcode.make(codigo)
+    buffer = BytesIO()
+    qr.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+# ======================================================
 # BUSCAR PRODUCTO
 # ======================================================
 
@@ -432,6 +446,17 @@ elif menu == "Buscar producto":
 
                 with col_info:
                     st.subheader(row["codigo"])
+
+                    # Mostrar QR
+                    qr_img = generar_qr(row["codigo"])
+                    st.image(qr_img, caption="QR del producto", width=150)
+
+                    st.download_button(
+                        label="Descargar QR",
+                        data=qr_img,
+                        file_name=f"{row['codigo']}.png",
+                        mime="image/png"
+                    )
                     st.write(f"**Marca:** {row['marca_nombre']}")
                     st.write(f"**Tipo:** {row['tipo_nombre']}")
                     st.write(f"**Talla:** {row['talla']}")
