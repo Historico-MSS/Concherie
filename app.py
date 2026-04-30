@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import qrcode
 from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -183,6 +184,46 @@ def generar_qr(codigo):
     qr = qrcode.make(codigo)
     buffer = BytesIO()
     qr.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def generar_etiqueta_qr(codigo):
+    """
+    Genera una etiqueta PNG con QR + código legible debajo.
+    """
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(codigo)
+    qr.make(fit=True)
+
+    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    qr_img = qr_img.resize((320, 320))
+
+    etiqueta_ancho = 420
+    etiqueta_alto = 420
+    etiqueta = Image.new("RGB", (etiqueta_ancho, etiqueta_alto), "white")
+
+    x_qr = (etiqueta_ancho - qr_img.width) // 2
+    etiqueta.paste(qr_img, (x_qr, 20))
+
+    draw = ImageDraw.Draw(etiqueta)
+
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+    except Exception:
+        font = ImageFont.load_default()
+
+    bbox = draw.textbbox((0, 0), codigo, font=font)
+    text_width = bbox[2] - bbox[0]
+    x_text = (etiqueta_ancho - text_width) // 2
+    draw.text((x_text, 350), codigo, fill="black", font=font)
+
+    buffer = BytesIO()
+    etiqueta.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
@@ -402,14 +443,29 @@ elif menu == "Buscar producto":
     if df.empty:
         st.warning("Todavía no hay productos cargados.")
     else:
-        busqueda = st.text_input(
+        col_filtro1, col_filtro2 = st.columns([1, 2])
+
+        with col_filtro1:
+            marca_filtro = st.selectbox(
+                "Filtrar por marca",
+                options=["Todas"] + list(MARCAS.keys()),
+                format_func=lambda x: "Todas" if x == "Todas" else f"{x} - {MARCAS[x]}"
+            )
+
+        with col_filtro2:
+            busqueda = st.text_input(
             "Buscar por código, marca, tipo, descripción, color o talla",
             placeholder="Ej: MRK, TP, negro, T46, vestido..."
         ).strip().lower()
 
+        df_filtrado = df.copy()
+
+        if marca_filtro != "Todas":
+            df_filtrado = df_filtrado[df_filtrado["marca_codigo"] == marca_filtro]
+
         if busqueda:
-            df_filtrado = df[
-                df.apply(
+            df_filtrado = df_filtrado[
+                df_filtrado.apply(
                     lambda row: busqueda in " ".join([
                         str(row.get("codigo", "")),
                         str(row.get("marca_codigo", "")),
@@ -424,9 +480,7 @@ elif menu == "Buscar producto":
                     axis=1
                 )
             ]
-        else:
-            df_filtrado = df
-
+        
         st.write(f"Resultados: {len(df_filtrado)}")
 
         for _, row in df_filtrado.iterrows():
@@ -458,13 +512,13 @@ elif menu == "Buscar producto":
                         st.write(f"**Descripción:** {row['descripcion']}")
 
                 with col_qr:
-                    qr_img = generar_qr(row["codigo"])
-                    st.image(qr_img, caption="QR", width=150)
+                    etiqueta_img = generar_etiqueta_qr(row["codigo"])
+                    st.image(etiqueta_img, caption="Etiqueta QR", width=180)
 
                     st.download_button(
-                        label="Descargar QR",
-                        data=qr_img,
-                        file_name=f"{row['codigo']}.png",
+                        label="Descargar etiqueta",
+                        data=etiqueta_img,
+                        file_name=f"etiqueta_{row['codigo']}.png",
                         mime="image/png",
-                        key=f"download_qr_{row['id']}"
+                        key=f"download_label_{row['id']}"
                     )
