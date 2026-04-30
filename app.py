@@ -8,6 +8,7 @@ import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 import cv2
 import numpy as np
+import shutil
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
@@ -702,9 +703,8 @@ def pantalla_cliente_publico():
     logout_button()
 
 def mostrar_ficha_producto(row, mostrar_acciones=True):
-    mostrar_estado_visual(row["estado"])
-
     with st.container(border=True):
+        mostrar_estado_visual(row["estado"])
         col_img, col_info, col_qr = st.columns([1, 3, 1])
 
         with col_img:
@@ -890,7 +890,8 @@ menu = st.sidebar.radio(
         "Ventas",
         "Reporte diario",
         "Reporte acumulado",
-        "Historial"
+        "Historial",
+        "Admin"
     ]
 )
 
@@ -1539,6 +1540,43 @@ elif menu == "Reporte acumulado":
                 file_name=f"reporte_acumulado_{inicio_str}_a_{fin_str}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+# ======================================================
+# ADMIN
+# ======================================================
+
+elif menu == "Admin":
+    if st.session_state.get("user") != "jc":
+        st.error("No tienes acceso a esta sección.")
+        st.stop()
+
+    st.header("Admin")
+    st.warning("Esta sección es solo para JC. Úsala únicamente para pruebas o antes de cargar el inventario real.")
+
+    st.subheader("Resetear datos de prueba")
+    st.write("Esto borra productos, clientas, movimientos, ventas, reservas, piezas con clientas y fotos cargadas.")
+
+    confirmacion = st.text_input("Para confirmar, escribe exactamente: RESET")
+    segunda_confirmacion = st.checkbox("Entiendo que esto borrará todos los datos actuales de la app")
+
+    if st.button("Resetear app"):
+        if confirmacion != "RESET" or not segunda_confirmacion:
+            st.error("Debes escribir RESET y marcar la confirmación para continuar.")
+        else:
+            conn = conectar_db()
+            conn.close()
+
+            db_file = Path(DB_PATH)
+            if db_file.exists():
+                db_file.unlink()
+
+            if UPLOAD_DIR.exists():
+                shutil.rmtree(UPLOAD_DIR)
+            UPLOAD_DIR.mkdir(exist_ok=True)
+
+            inicializar_db()
+            st.success("La app fue reseteada correctamente. Ya puedes cargar datos reales desde cero.")
+            st.rerun()
 
 # ======================================================
 # HISTORIAL
