@@ -321,38 +321,61 @@ if menu == "Nuevo producto":
 # ======================================================
 
 elif menu == "Inventario":
-    st.header("Inventario")
+    st.header("Inventario por modelo")
 
     df = obtener_productos()
 
     if df.empty:
         st.warning("Todavía no hay productos cargados.")
     else:
-        st.write(f"Total de productos cargados: {len(df)}")
+        # Crear código de modelo
+        df["modelo_codigo"] = (
+            df["marca_codigo"] + "-" + df["tipo_codigo"] + "-" + df["modelo"]
+        )
 
-        columnas = [
+        # Agrupar por modelo
+        agrupado = df.groupby("modelo_codigo").agg({
+            "descripcion": "first",
+            "color": "first",
+            "coleccion": "first",
+            "codigo": "count"
+        }).reset_index()
+
+        agrupado = agrupado.rename(columns={
+            "codigo": "total_piezas"
+        })
+
+        st.subheader("Vista general")
+        st.dataframe(agrupado, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.subheader("Ver detalle por modelo")
+
+        modelo_seleccionado = st.selectbox(
+            "Selecciona un modelo",
+            agrupado["modelo_codigo"].tolist()
+        )
+
+        df_modelo = df[df["modelo_codigo"] == modelo_seleccionado]
+
+        st.write(f"Piezas del modelo {modelo_seleccionado}:")
+
+        columnas_detalle = [
             "codigo",
-            "marca_codigo",
-            "tipo_codigo",
-            "modelo",
             "talla",
-            "numero_pieza",
-            "descripcion",
-            "color",
-            "coleccion",
-            "precio",
             "estado",
+            "precio",
             "fecha_creacion"
         ]
 
         st.dataframe(
-            df[columnas],
+            df_modelo[columnas_detalle],
             use_container_width=True,
             hide_index=True
         )
 
         st.download_button(
-            "Descargar inventario en CSV",
+            "Descargar inventario completo en CSV",
             data=df.to_csv(index=False).encode("utf-8"),
             file_name="inventario_tienda.csv",
             mime="text/csv"
