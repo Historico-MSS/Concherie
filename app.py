@@ -1,5 +1,7 @@
 import streamlit as st
 import sqlite3
+import qrcode
+from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
@@ -98,13 +100,9 @@ def generar_codigo(marca_codigo, tipo_codigo, modelo, talla):
     """
     Genera código tipo:
     MRK-TP-01-T46-#01
-
-    La pieza #01, #02, etc. se calcula según misma marca, tipo, modelo y talla.
     """
     conn = conectar_db()
     cursor = conn.cursor()
-
-    prefijo = f"{marca_codigo}-{tipo_codigo}-{modelo}-T{talla}-#"
 
     cursor.execute(
         """
@@ -123,7 +121,7 @@ def generar_codigo(marca_codigo, tipo_codigo, modelo, talla):
 
     siguiente_numero = len(existentes) + 1
     numero_pieza = f"{siguiente_numero:02d}"
-    codigo = f"{prefijo}{numero_pieza}"
+    codigo = f"{marca_codigo}-{tipo_codigo}-{modelo}-T{talla}-#{numero_pieza}"
 
     return codigo, numero_pieza
 
@@ -178,13 +176,24 @@ def guardar_producto(data):
 
 
 # ======================================================
+# QR
+# ======================================================
+
+def generar_qr(codigo):
+    qr = qrcode.make(codigo)
+    buffer = BytesIO()
+    qr.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+# ======================================================
 # INICIO APP
 # ======================================================
 
 inicializar_db()
 
 st.title("Control de Tienda")
-st.caption("Versión inicial: creación de productos, foto, código automático y listado general.")
+st.caption("Versión inicial: creación de productos, foto, código automático, inventario por modelo y QR.")
 
 menu = st.sidebar.radio(
     "Menú",
@@ -314,7 +323,7 @@ if menu == "Nuevo producto":
 
                 guardar_producto(data)
                 st.success(f"Producto creado correctamente: {codigo}")
-                st.info("Este será el código que luego aparecerá debajo del QR.")
+                st.info("Este será el código que aparecerá debajo del QR.")
 
 # ======================================================
 # INVENTARIO
@@ -328,12 +337,8 @@ elif menu == "Inventario":
     if df.empty:
         st.warning("Todavía no hay productos cargados.")
     else:
-        # Crear código de modelo
-        df["modelo_codigo"] = (
-            df["marca_codigo"] + "-" + df["tipo_codigo"] + "-" + df["modelo"]
-        )
+        df["modelo_codigo"] = df["marca_codigo"] + "-" + df["tipo_codigo"] + "-" + df["modelo"]
 
-        # Agrupar por modelo
         agrupado = df.groupby("modelo_codigo").agg({
             "descripcion": "first",
             "color": "first",
@@ -346,7 +351,11 @@ elif menu == "Inventario":
         })
 
         st.subheader("Vista general")
-        st.dataframe(agrupado, use_container_width=True, hide_index=True)
+        st.dataframe(
+            agrupado,
+            use_container_width=True,
+            hide_index=True
+        )
 
         st.markdown("---")
         st.subheader("Ver detalle por modelo")
@@ -380,20 +389,6 @@ elif menu == "Inventario":
             file_name="inventario_tienda.csv",
             mime="text/csv"
         )
-
-# ======================================================
-# QR GENERATION
-# ======================================================
-
-import qrcode
-from io import BytesIO
-
-
-def generar_qr(codigo):
-    qr = qrcode.make(codigo)
-    buffer = BytesIO()
-    qr.save(buffer, format="PNG")
-    return buffer.getvalue()
 
 # ======================================================
 # BUSCAR PRODUCTO
@@ -436,7 +431,7 @@ elif menu == "Buscar producto":
 
         for _, row in df_filtrado.iterrows():
             with st.container(border=True):
-                col_img, col_info = st.columns([1, 3])
+                col_img, col_info, col_qr = st.columns([1, 3, 1])
 
                 with col_img:
                     if row["foto_path"] and Path(row["foto_path"]).exists():
@@ -446,19 +441,9 @@ elif menu == "Buscar producto":
 
                 with col_info:
                     st.subheader(row["codigo"])
-
-                    # Mostrar QR
-                    qr_img = generar_qr(row["codigo"])
-                    st.image(qr_img, caption="QR del producto", width=150)
-
-                    st.download_button(
-                        label="Descargar QR",
-                        data=qr_img,
-                        file_name=f"{row['codigo']}.png",
-                        mime="image/png"
-                    )
                     st.write(f"**Marca:** {row['marca_nombre']}")
                     st.write(f"**Tipo:** {row['tipo_nombre']}")
+                    st.write(f"**Modelo:** {row['marca_codigo']}-{row['tipo_codigo']}-{row['modelo']}")
                     st.write(f"**Talla:** {row['talla']}")
                     st.write(f"**Color:** {row['color'] or 'No indicado'}")
                     st.write(f"**Colección:** {row['coleccion']}")
@@ -471,3 +456,15 @@ elif menu == "Buscar producto":
 
                     if row["descripcion"]:
                         st.write(f"**Descripción:** {row['descripcion']}")
+
+                with col_qr:
+                    qr_img = generar_qr(row["codigo"])
+                    st.image(qr_img, caption="QR", width=150)
+
+                    st.download_button(
+                        label="Descargar QR",
+                        data=qr_img,
+                        file_name=f"{row['codigo']}.png",
+                        mime="image/png",
+                        key=f"download_qr_{row['id']}"
+                    )
