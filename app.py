@@ -593,22 +593,44 @@ def mostrar_estado_visual(estado):
     color = colores.get(estado, "#6b7280")
     st.markdown(
         f"""
-        <div style="
+        <span style="
             background-color:{color};
             color:white;
-            padding:14px 18px;
-            border-radius:12px;
-            font-size:26px;
-            font-weight:800;
-            text-align:center;
-            margin-bottom:12px;
-            letter-spacing:1px;
+            padding:4px 10px;
+            border-radius:999px;
+            font-size:13px;
+            font-weight:700;
+            display:inline-block;
+            margin:2px 0 8px 0;
+            letter-spacing:0.3px;
         ">
             {estado.upper()}
-        </div>
+        </span>
         """,
         unsafe_allow_html=True
     )
+
+
+def badge_estado_html(estado):
+    colores = {
+        "Disponible": "#16a34a",
+        "Reservado": "#ca8a04",
+        "Con clienta": "#ea580c",
+        "Vendido": "#dc2626",
+        "Inactivo": "#6b7280"
+    }
+    color = colores.get(estado, "#6b7280")
+    return f"""
+        <span style="
+            background-color:{color};
+            color:white;
+            padding:3px 8px;
+            border-radius:999px;
+            font-size:12px;
+            font-weight:700;
+            white-space:nowrap;
+        ">{estado.upper()}</span>
+    """
 
 
 def obtener_otras_tallas_mismo_modelo(row):
@@ -701,6 +723,35 @@ def pantalla_cliente_publico():
             mostrar_ficha_producto_cliente(resultado.iloc[0])
 
     logout_button()
+
+def mostrar_producto_compacto(row):
+    """
+    Tarjeta compacta para navegar resultados en Buscar producto.
+    """
+    with st.container(border=True):
+        col_img, col_info, col_estado, col_accion = st.columns([0.8, 3.2, 1.2, 1])
+
+        with col_img:
+            if row["foto_path"] and Path(row["foto_path"]).exists():
+                st.image(row["foto_path"], width=75)
+            else:
+                st.caption("Sin foto")
+
+        with col_info:
+            st.markdown(f"**{row['codigo']}**")
+            descripcion = row["descripcion"] if row["descripcion"] else "Sin descripción"
+            precio = f"USD {row['precio']:,.2f}" if pd.notna(row["precio"]) else "Precio pendiente"
+            st.caption(f"{descripcion}")
+            st.caption(f"{row['marca_codigo']} · {row['tipo_codigo']} · Talla {row['talla']} · {row['color'] or 'Sin color'} · {precio}")
+
+        with col_estado:
+            st.markdown(badge_estado_html(row["estado"]), unsafe_allow_html=True)
+
+        with col_accion:
+            if st.button("Ver", key=f"ver_detalle_{row['id']}"):
+                st.session_state["detalle_producto_codigo"] = row["codigo"]
+                st.rerun()
+
 
 def mostrar_ficha_producto(row, mostrar_acciones=True):
     with st.container(border=True):
@@ -1050,8 +1101,38 @@ elif menu == "Buscar producto":
         df_filtrado = filtrar_productos_avanzado(df, marca_filtro, tipo_filtro, talla_filtro, estado_filtro, coleccion_filtro, busqueda)
 
         st.write(f"Resultados: {len(df_filtrado)}")
-        for _, row in df_filtrado.iterrows():
-            mostrar_ficha_producto(row)
+
+        vista = st.radio(
+            "Vista",
+            ["Compacta", "Detallada"],
+            horizontal=True,
+            index=0,
+            help="La vista compacta es mejor para navegar. La detallada muestra toda la ficha de cada pieza."
+        )
+
+        if vista == "Compacta":
+            if "detalle_producto_codigo" not in st.session_state:
+                st.session_state["detalle_producto_codigo"] = None
+
+            for _, row in df_filtrado.iterrows():
+                mostrar_producto_compacto(row)
+
+            if st.session_state.get("detalle_producto_codigo"):
+                st.markdown("---")
+                st.subheader("Detalle del producto")
+                detalle = df[df["codigo"] == st.session_state["detalle_producto_codigo"]]
+
+                if detalle.empty:
+                    st.warning("La pieza seleccionada ya no aparece en el inventario.")
+                    st.session_state["detalle_producto_codigo"] = None
+                else:
+                    if st.button("Cerrar detalle"):
+                        st.session_state["detalle_producto_codigo"] = None
+                        st.rerun()
+                    mostrar_ficha_producto(detalle.iloc[0])
+        else:
+            for _, row in df_filtrado.iterrows():
+                mostrar_ficha_producto(row)
 
 # ======================================================
 # ESCANEAR QR
