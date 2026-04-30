@@ -12,7 +12,7 @@ import shutil
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 
 # ======================================================
 # CONFIGURACIÓN GENERAL
@@ -304,6 +304,34 @@ def actualizar_estado_producto(codigo, nuevo_estado):
     conn.close()
 
 
+def actualizar_producto_admin(codigo, descripcion, color, coleccion, precio, estado, foto_path=None):
+    conn = conectar_db()
+    cursor = conn.cursor()
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if foto_path:
+        cursor.execute(
+            """
+            UPDATE productos
+            SET descripcion = ?, color = ?, coleccion = ?, precio = ?, estado = ?, foto_path = ?, fecha_actualizacion = ?
+            WHERE codigo = ?
+            """,
+            (descripcion, color, coleccion, precio, estado, foto_path, ahora, codigo)
+        )
+    else:
+        cursor.execute(
+            """
+            UPDATE productos
+            SET descripcion = ?, color = ?, coleccion = ?, precio = ?, estado = ?, fecha_actualizacion = ?
+            WHERE codigo = ?
+            """,
+            (descripcion, color, coleccion, precio, estado, ahora, codigo)
+        )
+
+    conn.commit()
+    conn.close()
+
+
 def registrar_movimiento(
     producto_codigo,
     tipo_movimiento,
@@ -573,6 +601,68 @@ def generar_excel_reporte(fecha_str, resumen, ventas_dia, devoluciones_dia, con_
         con_clienta.to_excel(writer, sheet_name="Con clientas", index=False)
         reservas.to_excel(writer, sheet_name="Reservas", index=False)
         movimientos.to_excel(writer, sheet_name="Historial", index=False)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generar_pdf_disponibles_con_fotos(productos):
+    disponibles = productos[productos["estado"] == "Disponible"].copy() if not productos.empty else productos
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("Catálogo de piezas disponibles", styles["Title"]))
+    story.append(Paragraph(f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    if disponibles.empty:
+        story.append(Paragraph("No hay piezas disponibles.", styles["Normal"]))
+    else:
+        for _, row in disponibles.iterrows():
+            datos = []
+            datos.append(["Código", str(row["codigo"])])
+            datos.append(["Marca", str(row["marca_nombre"])])
+            datos.append(["Tipo", str(row["tipo_nombre"])])
+            datos.append(["Talla", str(row["talla"])])
+            datos.append(["Color", str(row["color"] or "")])
+            datos.append(["Colección", str(row["coleccion"] or "")])
+            precio_txt = f"USD {row['precio']:,.2f}" if pd.notna(row["precio"]) else "Pendiente"
+            datos.append(["Precio", precio_txt])
+            datos.append(["Estado", str(row["estado"])])
+            if row["descripcion"]:
+                datos.append(["Descripción", str(row["descripcion"])])
+
+            tabla_datos = Table(datos, colWidths=[80, 260])
+            tabla_datos.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.grey),
+                ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]))
+
+            foto_elemento = Paragraph("Sin foto", styles["Normal"])
+            if row["foto_path"] and Path(row["foto_path"]).exists():
+                try:
+                    foto_elemento = RLImage(row["foto_path"], width=110, height=110)
+                except Exception:
+                    foto_elemento = Paragraph("Foto no disponible", styles["Normal"])
+
+            ficha = Table([[foto_elemento, tabla_datos]], colWidths=[130, 350])
+            ficha.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]))
+            story.append(ficha)
+            story.append(Spacer(1, 10))
+
+    doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
@@ -931,7 +1021,7 @@ menu = st.sidebar.radio(
     [
         "Nuevo producto",
         "Inventario",
-        "Buscar producto",
+        "Buscar pieza",
         "Escanear QR",
         "Clientes",
         "Piezas con clientas",
@@ -1066,14 +1156,29 @@ elif menu == "Inventario":
             df_modelo = df_vista[df_vista["modelo_codigo"] == modelo_seleccionado]
             st.dataframe(df_modelo[["codigo", "talla", "estado", "precio", "fecha_creacion"]], use_container_width=True, hide_index=True)
 
-        st.download_button("Descargar inventario completo en CSV", data=df.to_csv(index=False).encode("utf-8"), file_name="inventario_tienda.csv", mime="text/csv")
+        pdf_disponibles = generar_pdf_disponibles_con_fotos(df)
+        col_desc1, col_desc2 = st.columns(2)
+        with col_desc1:
+            st.download_button(
+                "Descargar inventario completo en CSV",
+                data=df.to_csv(index=False).encode("utf-8"),
+                file_name="inventario_tienda.csv",
+                mime="text/csv"
+            )
+        with col_desc2:
+            st.download_button(
+                "Descargar catálogo PDF de disponibles con fotos",
+                data=pdf_disponibles,
+                file_name="catalogo_disponibles_con_fotos.pdf",
+                mime="application/pdf"
+            )
 
 # ======================================================
 # BUSCAR PRODUCTO
 # ======================================================
 
-elif menu == "Buscar producto":
-    st.header("Buscar producto")
+elif menu == "Buscar pieza":
+    st.header("Buscar pieza")
     df = obtener_productos()
 
     if df.empty:
@@ -1630,32 +1735,102 @@ elif menu == "Admin":
         st.stop()
 
     st.header("Admin")
-    st.warning("Esta sección es solo para JC. Úsala únicamente para pruebas o antes de cargar el inventario real.")
+    st.warning("Esta sección es solo para JC. Úsala únicamente para ajustes, correcciones o antes de cargar el inventario real.")
 
-    st.subheader("Resetear datos de prueba")
-    st.write("Esto borra productos, clientas, movimientos, ventas, reservas, piezas con clientas y fotos cargadas.")
+    tab_modificar, tab_reset = st.tabs(["Modificar piezas", "Resetear datos de prueba"])
 
-    confirmacion = st.text_input("Para confirmar, escribe exactamente: RESET")
-    segunda_confirmacion = st.checkbox("Entiendo que esto borrará todos los datos actuales de la app")
+    with tab_modificar:
+        st.subheader("Modificar piezas")
+        productos = obtener_productos()
 
-    if st.button("Resetear app"):
-        if confirmacion != "RESET" or not segunda_confirmacion:
-            st.error("Debes escribir RESET y marcar la confirmación para continuar.")
+        if productos.empty:
+            st.info("Todavía no hay piezas cargadas.")
         else:
-            conn = conectar_db()
-            conn.close()
+            busqueda_admin = st.text_input("Buscar pieza para modificar", placeholder="Código, marca, descripción, talla...").strip().lower()
+            productos_vista = productos.copy()
 
-            db_file = Path(DB_PATH)
-            if db_file.exists():
-                db_file.unlink()
+            if busqueda_admin:
+                productos_vista = productos_vista[
+                    productos_vista.apply(lambda row: busqueda_admin in " ".join([
+                        str(row.get("codigo", "")),
+                        str(row.get("marca_codigo", "")),
+                        str(row.get("marca_nombre", "")),
+                        str(row.get("tipo_codigo", "")),
+                        str(row.get("tipo_nombre", "")),
+                        str(row.get("descripcion", "")),
+                        str(row.get("color", "")),
+                        str(row.get("talla", "")),
+                        str(row.get("estado", "")),
+                        str(row.get("coleccion", ""))
+                    ]).lower(), axis=1)
+                ]
 
-            if UPLOAD_DIR.exists():
-                shutil.rmtree(UPLOAD_DIR)
-            UPLOAD_DIR.mkdir(exist_ok=True)
+            if productos_vista.empty:
+                st.warning("No encontré piezas con ese criterio.")
+            else:
+                codigo_sel = st.selectbox("Selecciona la pieza", productos_vista["codigo"].tolist())
+                row = productos[productos["codigo"] == codigo_sel].iloc[0]
 
-            inicializar_db()
-            st.success("La app fue reseteada correctamente. Ya puedes cargar datos reales desde cero.")
-            st.rerun()
+                st.caption("Por seguridad, desde aquí no se cambia el código, marca, tipo, modelo ni talla. Solo datos editables de operación.")
+                mostrar_ficha_producto(row, mostrar_acciones=False)
+
+                with st.form(f"admin_editar_{row['id']}"):
+                    descripcion = st.text_area("Descripción", value=row["descripcion"] or "")
+                    color = st.text_input("Color", value=row["color"] or "")
+                    coleccion_actual = row["coleccion"] if row["coleccion"] in COLECCIONES else COLECCIONES[0]
+                    coleccion = st.selectbox("Colección", COLECCIONES, index=COLECCIONES.index(coleccion_actual))
+                    precio_actual = float(row["precio"]) if pd.notna(row["precio"]) else 0.0
+                    precio = st.number_input("Precio", min_value=0.0, value=precio_actual, step=1.0)
+                    estado_actual = row["estado"] if row["estado"] in ESTADOS else "Disponible"
+                    estado = st.selectbox("Estado", ESTADOS, index=ESTADOS.index(estado_actual))
+                    nueva_foto = st.file_uploader("Reemplazar foto (opcional)", type=["jpg", "jpeg", "png"])
+                    observacion = st.text_area("Nota de corrección / motivo", placeholder="Ej: corrección de precio, cambio de foto...")
+
+                    guardar_cambios = st.form_submit_button("Guardar cambios")
+
+                    if guardar_cambios:
+                        foto_path = None
+                        if nueva_foto is not None:
+                            extension = Path(nueva_foto.name).suffix.lower()
+                            foto_path = str(UPLOAD_DIR / f"{row['codigo']}{extension}")
+                            with open(foto_path, "wb") as f:
+                                f.write(nueva_foto.getbuffer())
+
+                        actualizar_producto_admin(row["codigo"], descripcion, color, coleccion, precio, estado, foto_path)
+                        registrar_movimiento(
+                            producto_codigo=row["codigo"],
+                            tipo_movimiento="Corrección admin",
+                            precio=precio,
+                            observacion=observacion or "Corrección de datos de pieza"
+                        )
+                        st.success("Pieza modificada correctamente.")
+                        st.rerun()
+
+    with tab_reset:
+        st.subheader("Resetear datos de prueba")
+        st.write("Esto borra productos, clientas, movimientos, ventas, reservas, piezas con clientas y fotos cargadas.")
+
+        confirmacion = st.text_input("Para confirmar, escribe exactamente: RESET")
+        segunda_confirmacion = st.checkbox("Entiendo que esto borrará todos los datos actuales de la app")
+
+        if st.button("Resetear app"):
+            if confirmacion != "RESET" or not segunda_confirmacion:
+                st.error("Debes escribir RESET y marcar la confirmación para continuar.")
+            else:
+                conn = conectar_db()
+                conn.close()
+
+                db_file = Path(DB_PATH)
+                if db_file.exists():
+                    db_file.unlink()
+
+                if UPLOAD_DIR.exists():
+                    shutil.rmtree(UPLOAD_DIR)
+                UPLOAD_DIR.mkdir(exist_ok=True)
+
+                inicializar_db()
+                st.success("La app fue reseteada correctamente. Ya puedes cargar datos reales desde cero.")
+                st.rerun()
 
 # ======================================================
 # HISTORIAL
