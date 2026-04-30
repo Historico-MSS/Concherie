@@ -49,6 +49,46 @@ COLECCIONES = [
     "Por definir"
 ]
 
+USERS = {
+    "concha": "patrona",
+    "moira": "asistonta",
+    "jc": "master"
+}
+
+# ======================================================
+# LOGIN
+# ======================================================
+
+def login():
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    if not st.session_state.logged_in:
+        st.title("Acceso a Control de Tienda")
+        st.write("Ingresa tu usuario y clave para continuar.")
+
+        user = st.text_input("Usuario").strip().lower()
+        password = st.text_input("Clave", type="password")
+
+        if st.button("Entrar"):
+            if user in USERS and USERS[user] == password:
+                st.session_state.logged_in = True
+                st.session_state.user = user
+                st.rerun()
+            else:
+                st.error("Usuario o clave incorrecta")
+
+        st.stop()
+
+
+def logout_button():
+    with st.sidebar:
+        st.caption(f"Usuario: {st.session_state.get('user', '')}")
+        if st.button("Cerrar sesión"):
+            st.session_state.logged_in = False
+            st.session_state.user = None
+            st.rerun()
+
 # ======================================================
 # BASE DE DATOS
 # ======================================================
@@ -213,14 +253,14 @@ def generar_etiqueta_qr(codigo):
     draw = ImageDraw.Draw(etiqueta)
 
     try:
-        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", 40)
     except Exception:
         font = ImageFont.load_default()
 
     bbox = draw.textbbox((0, 0), codigo, font=font)
     text_width = bbox[2] - bbox[0]
     x_text = (etiqueta_ancho - text_width) // 2
-    draw.text((x_text, 350), codigo, fill="black", font=font)
+    draw.text((x_text, 352), codigo, fill="black", font=font)
 
     buffer = BytesIO()
     etiqueta.save(buffer, format="PNG")
@@ -232,6 +272,8 @@ def generar_etiqueta_qr(codigo):
 # ======================================================
 
 inicializar_db()
+login()
+logout_button()
 
 st.title("Control de Tienda")
 st.caption("Versión inicial: creación de productos, foto, código automático, inventario por modelo y QR.")
