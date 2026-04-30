@@ -218,9 +218,12 @@ def guardar_o_actualizar_cliente(nombre, telefono=None, notas=None):
         cliente_id = existente[0]
         notas_actuales = existente[1] or ""
         notas_finales = notas_actuales
+
         if notas and notas not in notas_actuales:
-            notas_finales = (notas_actuales + "
-" + notas).strip()
+            if notas_actuales:
+                notas_finales = notas_actuales + " | " + notas
+            else:
+                notas_finales = notas
 
         cursor.execute(
             "UPDATE clientes SET notas = ?, fecha_actualizacion = ? WHERE id = ?",
