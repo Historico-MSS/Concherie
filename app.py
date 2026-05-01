@@ -51,8 +51,9 @@ ESTADOS = [
 ]
 
 COLECCIONES = [
-    "Nueva colección",
-    "Selección especial"
+    "NOVEDADES",
+    "COLECCIÓN"
+]
 ]
 
 FORMAS_PAGO = [
