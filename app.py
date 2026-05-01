@@ -4,6 +4,7 @@ import qrcode
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 import cv2
@@ -71,6 +72,16 @@ USERS = {
     "info": "precios",
     "cliente": "2026"
 }
+
+CARACAS_TZ = ZoneInfo("America/Caracas")
+
+
+def ahora_caracas():
+    return datetime.now(CARACAS_TZ)
+
+
+def ahora_caracas_str():
+    return ahora_caracas().strftime("%Y-%m-%d %H:%M:%S")
 
 # ======================================================
 # LOGIN
@@ -205,7 +216,7 @@ def guardar_o_actualizar_cliente(nombre, telefono=None, notas=None):
 
     conn = conectar_db()
     cursor = conn.cursor()
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = ahora_caracas_str()
 
     cursor.execute(
         "SELECT id, notas FROM clientes WHERE LOWER(nombre) = LOWER(?) AND IFNULL(telefono, '') = ?",
@@ -295,7 +306,7 @@ def guardar_producto(data):
 def actualizar_estado_producto(codigo, nuevo_estado):
     conn = conectar_db()
     cursor = conn.cursor()
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = ahora_caracas_str()
     cursor.execute(
         "UPDATE productos SET estado = ?, fecha_actualizacion = ? WHERE codigo = ?",
         (nuevo_estado, ahora, codigo)
@@ -307,7 +318,7 @@ def actualizar_estado_producto(codigo, nuevo_estado):
 def actualizar_producto_admin(codigo, descripcion, color, coleccion, precio, estado, foto_path=None):
     conn = conectar_db()
     cursor = conn.cursor()
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = ahora_caracas_str()
 
     if foto_path:
         cursor.execute(
@@ -349,7 +360,7 @@ def registrar_movimiento(
 
     conn = conectar_db()
     cursor = conn.cursor()
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = ahora_caracas_str()
     usuario = st.session_state.get("user", "")
 
     cursor.execute(
@@ -552,7 +563,7 @@ def generar_pdf_reporte(fecha_str, tipo_reporte, resumen, ventas_dia, devolucion
     story = []
 
     story.append(Paragraph(f"Reporte {tipo_reporte} - {fecha_str}", styles["Title"]))
-    story.append(Paragraph(f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+    story.append(Paragraph(f"Generado: {ahora_caracas_str()}", styles["Normal"]))
     story.append(Spacer(1, 12))
 
     resumen_data = [["Concepto", "Valor"]] + [[k, v] for k, v in resumen.items()]
@@ -614,7 +625,7 @@ def generar_pdf_disponibles_con_fotos(productos):
     story = []
 
     story.append(Paragraph("Catálogo de piezas disponibles", styles["Title"]))
-    story.append(Paragraph(f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+    story.append(Paragraph(f"Generado: {ahora_caracas_str()}", styles["Normal"]))
     story.append(Spacer(1, 12))
 
     if disponibles.empty:
@@ -1023,25 +1034,28 @@ if "menu_actual" not in st.session_state:
 opciones_menu = [
     "Inicio rápido",
     "Cuaderno del día",
-        "Nuevo producto",
-        "Inventario",
-        "Buscar pieza",
-        "Escanear QR",
-        "Clientes",
-        "Piezas con clientas",
-        "Reservas",
-        "Ventas",
-        "Reporte diario",
-        "Reporte acumulado",
-        "Historial",
-        "Admin"
-    ]
+    "Nuevo producto",
+    "Inventario",
+    "Buscar pieza",
+    "Escanear QR",
+    "Clientes",
+    "Piezas con clientas",
+    "Reservas",
+    "Ventas",
+    "Reporte diario",
+    "Reporte acumulado",
+    "Historial",
+    "Admin"
 ]
+
+menu_guardado = st.session_state.get("menu_actual", "Inicio rápido")
+if menu_guardado not in opciones_menu:
+    menu_guardado = "Inicio rápido"
 
 menu = st.sidebar.radio(
     "Menú",
     opciones_menu,
-    index=opciones_menu.index(st.session_state.get("menu_actual", "Inicio rápido"))
+    index=opciones_menu.index(menu_guardado)
 )
 st.session_state["menu_actual"] = menu
 
@@ -1206,7 +1220,7 @@ elif menu == "Nuevo producto":
                         st.error("El precio debe ser un número. Ejemplo: 350")
                         st.stop()
 
-                ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                ahora = ahora_caracas_str()
                 data = {
                     "codigo": codigo,
                     "marca_codigo": marca_codigo,
