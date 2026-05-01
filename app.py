@@ -1014,11 +1014,15 @@ if st.session_state.get("user") == "cliente":
 logout_button()
 
 st.title("Control de Tienda")
-st.caption("Sistema interno para inventario, QR, ventas, reservas, piezas con clientas, clientes y reportes.")
+st.caption("Cuaderno digital para inventario, clientas, ventas, abonos, reservas y cierre del día.")
 
-menu = st.sidebar.radio(
-    "Menú",
-    [
+# Navegación por botones desde Inicio rápido
+if "menu_actual" not in st.session_state:
+    st.session_state["menu_actual"] = "Inicio rápido"
+
+opciones_menu = [
+    "Inicio rápido",
+    "Cuaderno del día",
         "Nuevo producto",
         "Inventario",
         "Buscar pieza",
@@ -1032,13 +1036,128 @@ menu = st.sidebar.radio(
         "Historial",
         "Admin"
     ]
+]
+
+menu = st.sidebar.radio(
+    "Menú",
+    opciones_menu,
+    index=opciones_menu.index(st.session_state.get("menu_actual", "Inicio rápido"))
 )
+st.session_state["menu_actual"] = menu
+
+# ======================================================
+# INICIO RÁPIDO
+# ======================================================
+
+if menu == "Inicio rápido":
+    st.header("Inicio rápido")
+    st.write("Elige qué quieres hacer ahora.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Escanear pieza", use_container_width=True):
+            st.session_state["menu_actual"] = "Escanear QR"
+            st.rerun()
+
+        if st.button("Buscar clienta", use_container_width=True):
+            st.session_state["menu_actual"] = "Clientes"
+            st.rerun()
+
+        if st.button("Ver piezas con clientas", use_container_width=True):
+            st.session_state["menu_actual"] = "Piezas con clientas"
+            st.rerun()
+
+    with col2:
+        if st.button("Buscar pieza", use_container_width=True):
+            st.session_state["menu_actual"] = "Buscar pieza"
+            st.rerun()
+
+        if st.button("Inventario", use_container_width=True):
+            st.session_state["menu_actual"] = "Inventario"
+            st.rerun()
+
+        if st.button("Cierre del día", use_container_width=True):
+            st.session_state["menu_actual"] = "Reporte diario"
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("Resumen rápido de hoy")
+
+    productos = obtener_productos()
+    movimientos = obtener_movimientos()
+    fecha_hoy = date.today().strftime("%Y-%m-%d")
+    resumen, mov_dia, ventas_dia, devoluciones_dia, con_clienta, reservas, disponibles, vendidas = calcular_resumen_reporte(productos, movimientos, fecha_hoy)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Ventas netas hoy", resumen["Ventas netas del día"])
+    c2.metric("Cobrado hoy", resumen["Pagado registrado"])
+    c3.metric("Pendiente neto", resumen["Pendiente neto"])
+
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Con clientas", resumen["Piezas con clientas"])
+    c5.metric("Reservadas", resumen["Piezas reservadas"])
+    c6.metric("Disponibles", resumen["Piezas disponibles"])
+
+# ======================================================
+# CUADERNO DEL DÍA
+# ======================================================
+
+elif menu == "Cuaderno del día":
+    st.header("Cuaderno del día")
+    st.write("Resumen simple de lo que ha pasado hoy en la tienda.")
+
+    productos = obtener_productos()
+    movimientos = obtener_movimientos()
+    fecha_hoy = date.today().strftime("%Y-%m-%d")
+    resumen, mov_dia, ventas_dia, devoluciones_dia, con_clienta, reservas, disponibles, vendidas = calcular_resumen_reporte(productos, movimientos, fecha_hoy)
+
+    st.subheader("Números de hoy")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Ventas brutas", resumen["Ventas brutas del día"])
+    c2.metric("Devoluciones", resumen["Devoluciones del día"])
+    c3.metric("Ventas netas", resumen["Ventas netas del día"])
+    c4.metric("Cobrado", resumen["Pagado registrado"])
+
+    st.markdown("---")
+
+    st.subheader("Ventas de hoy")
+    if ventas_dia.empty:
+        st.info("Aún no hay ventas registradas hoy.")
+    else:
+        for _, mov in ventas_dia.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**{mov['cliente'] or 'Clienta no indicada'}**")
+                st.write(f"Pieza: {mov['producto_codigo']}")
+                st.write(f"Precio: USD {mov['precio'] or 0:,.2f} · Pagado: USD {mov['monto_pagado'] or 0:,.2f}")
+                if mov['estado_pago']:
+                    st.caption(f"Pago: {mov['estado_pago']}")
+                if mov['observacion']:
+                    st.caption(f"Nota: {mov['observacion']}")
+
+    st.subheader("Piezas con clientas")
+    if con_clienta.empty:
+        st.info("No hay piezas con clientas en este momento.")
+    else:
+        for _, row in con_clienta.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**{row['codigo']}**")
+                st.write(f"{row['descripcion'] or 'Sin descripción'} · Talla {row['talla']} · USD {row['precio'] if pd.notna(row['precio']) else 'pendiente'}")
+
+    st.subheader("Reservas activas")
+    if reservas.empty:
+        st.info("No hay reservas activas.")
+    else:
+        for _, row in reservas.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**{row['codigo']}**")
+                st.write(f"{row['descripcion'] or 'Sin descripción'} · Talla {row['talla']} · USD {row['precio'] if pd.notna(row['precio']) else 'pendiente'}")
 
 # ======================================================
 # NUEVO PRODUCTO
 # ======================================================
 
-if menu == "Nuevo producto":
+elif menu == "Nuevo producto":
     st.header("Nuevo producto")
     st.write("Carga una pieza nueva. El sistema generará el código automáticamente.")
 
